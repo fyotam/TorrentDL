@@ -1,0 +1,5 @@
+1. Generalize paths.
+2. Sometimes there are no end of lines in the end of the serie line in the torrent file.
+3. Add validation for downloaded torrent names.
+4. Support magnet files.
+5. Move to imdb's new page format.

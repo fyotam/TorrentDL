@@ -1,0 +1,67 @@
+#!/usr/bin/perl
+
+use lib "/mnt/downloads/torrentdl/";
+use tdfuncs;
+
+$pb_search_file="/mnt/downloads/torrentdl/pb_search.html";
+#$torrentFileName="/mnt/downloads/torrentdl/torrent.tor"; # The torrent will be saved to this file name
+$torrentFileName="/mnt/downloads/torrentdl/torrent.tor"; # The torrent will be saved to this file name
+
+$ARGC=$#ARGV + 1; # Getting the number of arguments
+tdfuncs::verbosePrint("tordl: ARGV=@ARGV, ARGC=$ARGC\n", 1);
+
+if ($ARGC != 3)
+{
+	tdfuncs::verbosePrint("tordl: Wrong number of arguments ($ARGC). Exiting...\n");
+	exit;
+}
+
+$e_name=$ARGV[0];
+$season_num=sprintf("%.2d", $ARGV[1]);
+$episode_num=sprintf("%.2d", $ARGV[2]);
+
+# replace spaces with %20 in the serie name
+my $str = $e_name;
+my $find = " ";
+my $replace = "%20";
+$find = quotemeta $find; # escape regex metachars if present
+$str =~ s/$find/$replace/g;
+$e_name = $str;
+
+tdfuncs::verbosePrint("$e_name, $season_num, $episode_num.\n", 0);
+
+$PirateBayURLPattern="http://thepiratebay.org/search/%s%20S%sE%s/0/7/0";
+
+$PB_URL=sprintf($PirateBayURLPattern, $e_name, $season_num, $episode_num);
+
+tdfuncs::verbosePrint("Downloading thepiratebay.org search page... ($PB_URL)\n", 0);
+`/usr/bin/wget $PB_URL -O $pb_search_file`;
+
+#`grep """http.*\.\torrent""" pb_search.html`;
+
+@torrent_links = `/bin/grep -o "http.*\\.torrent" $pb_search_file`;
+
+$torrentCount = $#torrent_links + 1;
+
+if ($torrentCount > 0) # check that torrents were found
+{
+	tdfuncs::verbosePrint("Number of torrents is $torrentCount. Selecting the first...\n", 0);
+	
+	tdfuncs::verbosePrint("The torrent link: $torrent_links[0]\n", 0);
+	
+	if (-f "$torrentFileName") {
+		`rm $torrentFileName`;
+	}
+	
+	tdfuncs::verbosePrint("Downloading the torrent file from thepiratebay.org ($torrent_links[0]).\n", 0);
+	`/usr/bin/wget -O $torrentFileName $torrent_links[0]`;
+	
+	tdfuncs::verbosePrint("Adding the torrent file ($torrentFileName) to transmission download list.\n", 0);
+	`/usr/bin/transmission-remote -n torrent:king -a $torrentFileName`;
+}
+else
+{
+	tdfuncs::verbosePrint("No torrents were found!.\n", 0);
+}
+tdfuncs::verbosePrint("SUCCESS.\n", 0);
+

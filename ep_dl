@@ -1,0 +1,168 @@
+#!/usr/bin/perl
+
+use POSIX;
+use Time::Local;
+
+use lib "/mnt/downloads/torrentdl/";
+use tdfuncs;
+
+# The time between the episode release and when we try to download it
+$grace_days = 1;
+
+# List of months
+@months = ("January","February","March","April","May","June","July","August","September","October","November","December");
+
+#$imdb_episode_list_file = "/mnt/downloads/torrentdl/episodes.html"; # The name of the file to download the episode list from imdb to.
+#$data_file="/mnt/downloads/torrentdl/3.lst"; # The name of the torrent list file
+$imdb_episode_list_file = "/mnt/downloads/torrentdl/episodes.html"; # The name of the file to download the episode list from imdb to.
+$data_file="/mnt/downloads/torrentdl/torrents.lst"; # The name of the torrent list file
+$torrentDLScr = "/mnt/downloads/torrentdl/tordl"; # The torrent download script path 
+
+
+# Check if the given string is a month
+sub isMonth
+{
+	$month_name = @_[0];
+	my $isMonthName = 0;
+	for (@months) { $isMonthName = $isMonthName || ($_ == $month_name); }
+	return $isMonthName != 0;
+}
+
+# Get the targets to download from the data file
+sub loadTargetsFromFile
+{
+	my $data_file = @_[0]; 
+	open(DAT, $data_file) || die("Could not open file!");
+	@raw_data=<DAT>;
+	close(DAT);
+	chomp(@raw_data);
+	return @raw_data; 
+}
+
+# Save the targets to download to the data file
+sub saveTargetsToFile
+{
+	my $data_file = @_[0]; 
+	tdfuncs::verbosePrint("Saving $data_file...\n", 1);
+	open(DAT, ">$data_file") || die("Could not open file!");
+	print DAT @raw_data;
+	close(DAT);
+}
+
+@raw_data = loadTargetsFromFile($data_file); # Get the shows to download
+
+foreach $torrents (@raw_data)
+{
+	chomp($torrents);
+	($e_name,$imdb_page,$season_num,$episode_num)=split(/\,/,$torrents);
+	$torrents .= "\n"; # Add newline between the torrents	
+	tdfuncs::verbosePrint("$e_name, $season_num, $episode_num, $imdb_page.\n", 1);
+	
+	tdfuncs::verbosePrint("Downloading the episode list from imdb.com...\n", 0);
+	`/usr/bin/wget $imdb_page -O $imdb_episode_list_file`;
+	
+	$sn=sprintf("%d",$season_num);
+	$en=sprintf("%d",$episode_num);
+	
+	tdfuncs::verbosePrint("Season Number= $sn, Episode Number=$en.\n", 1);
+	
+	@seasons = `grep -o '<div class=\"season-filter-all filter-season-.*\">' $imdb_episode_list_file`;
+	
+	tdfuncs::verbosePrint("Number of seasons is ",@seasons.".\n", 0);
+	
+	tdfuncs::verbosePrint("grep 'Season $sn, Episode $en:' $imdb_episode_list_file\n", 1);
+	
+	@html_episodes = `/bin/grep 'Season $sn, Episode $en:' $imdb_episode_list_file`;
+	
+        tdfuncs::verbosePrint("IMDB episode data: \"@html_episodes\"\n", 2);
+	
+	$date_left_bound="Original Air Date&mdash;<strong>";
+	$date_right_bound="\</strong\>";
+	$startpos = index($html_episodes[0], $date_left_bound)+length($date_left_bound);
+	$endpos = index($html_episodes[0], $date_right_bound);
+	
+	if (($startpos > 0) && ($endpos > 0) && ($endpos > $startpos)) {
+		tdfuncs::verbosePrint("startpos=$startpos\n", 2);   
+		tdfuncs::verbosePrint("endpos=$endpos\n", 2);
+		$episode_date = substr($html_episodes[0], $startpos, $endpos-$startpos); 
+		tdfuncs::verbosePrint("Episode date: $episode_date.\n", 0);
+		@split_date = split(/ /,$episode_date);
+		$day=$split_date[0];
+		$month_name=$split_date[1];
+		my %index;
+		@index{@months} = (0..$#months);
+		
+		if (isMonth($month_name))
+		{
+			tdfuncs::verbosePrint("Valid episode time.\n", 1);
+			my $index = $index{$month_name};
+			
+			$month=$index+1;
+			$year=$split_date[2];
+			
+			tdfuncs::verbosePrint("day=$day, month=$month, year=$year\n", 2);
+			$etime = timegm(0,0,0,($day+$grace_days)%31,$month_name,$year);
+		}
+		else 
+		{
+			tdfuncs::verbosePrint("Unvalid episode time. Taking far future time...\n", 1);
+			$etime = timegm(0,0,0,1,1,2030); # If the month is not valid return time far in the future
+		}
+		
+		$current = time; # Get the current time
+		
+		tdfuncs::verbosePrint("current=$current\n", 2);
+		tdfuncs::verbosePrint("etime  =$etime\n", 2);	
+		
+		if ($current - $etime > 0) 
+		{
+			tdfuncs::verbosePrint("Downloading torrent... [$torrentDLScr $e_name $season_num $episode_num]\n", 0);
+			`$torrentDLScr "$e_name" $season_num $episode_num`;
+			
+			# Set the data file to the next episode to download
+			$new_episode_num = $en + 1;
+			$new_season_num = $sn;
+			$new_episode_found = 0;
+			@all_html_spisodes = `/bin/grep 'Season .*, Episode .*:' $imdb_episode_list_file`;
+			
+			if ("@all_html_spisodes" =~ m/Season $new_season_num, Episode $new_episode_num:/)
+			{
+				tdfuncs::verbosePrint("Setting next download to the next episode in the season.\n", 0);
+				$new_season_num = $sn;
+				$new_episode_found = 1;
+			}
+			else
+			{
+				$new_season_num = $sn + 1;
+				$new_episode_num = 1;
+				if ("@all_html_spisodes" =~ m/Season $new_season_num, Episode $new_episode_num:/)
+				{
+					tdfuncs::verbosePrint("Setting next download to the first episode of the next season.\n", 0);
+					$new_episode_found = 1;
+				}
+			}
+			
+			if ($new_episode_found == 0) {
+				tdfuncs::verbosePrint("Could not find the next episode in IMDB page.\n", 0);
+			} else {
+				$torrents = "$e_name,$imdb_page,$new_season_num,$new_episode_num";
+				tdfuncs::verbosePrint("$torrents\n", 2);
+	                        $torrents .= "\n"; # Add newline between the torrents	
+			}			
+		}
+		else
+		{
+			tdfuncs::verbosePrint("Episode hasn't been broadcasted yet...\n", 0);
+		}
+					} 
+	else 
+	{
+		tdfuncs::verbosePrint("Episode hasn't been found\n", 0);
+	}
+	
+} # episode loop end
+
+saveTargetsToFile($data_file); # Save the shows to download
+
+tdfuncs::verbosePrint("Done.\n", 0);
+
