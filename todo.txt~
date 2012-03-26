@@ -1,3 +1,0 @@
-1. Add support for spaces in the name of series. (p720)
-2. Sometimes there are no end of lines in the end of the serie line in the torrent file.
-3. Add validation for downloaded torrent names.
